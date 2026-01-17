@@ -3,6 +3,8 @@
 A lightweight, dependency-free audio player and waveform visualizer built with **HTML5 Canvas** and the **Web Audio API**.  
 It supports local audio playback, real-time waveform rendering, idle animation, and customizable spectrum styles.
 
+<details>
+  <summary><strong>English (Click to expand)</strong></summary>
 ---
 
 ## ✨ Features
@@ -32,7 +34,12 @@ It supports local audio playback, real-time waveform rendering, idle animation, 
   - Automatically scales for device pixel ratio
   - Adapts to window resizing
 
+</details>
+
 ---
+
+<details>
+  <summary><strong>한국어 (펼치기/접기)</strong></summary>
 
 ## 🚀 How to Use
 
@@ -128,3 +135,5 @@ No external libraries or assets are required.
 
 본 프로젝트는 학습, 실험, 개인/상업적 용도로 자유롭게 사용할 수 있습니다.  
 외부 라이브러리나 리소스에 의존하지 않습니다.
+
+</details>
