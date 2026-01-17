@@ -68,9 +68,6 @@ No external libraries or assets are required.
 
 ---
 
-<details>
-  <summary><strong>한국어 (펼치기/접기)</strong></summary>
-
 # 사운드 웨이브 시각화 (HTML5 + Web Audio API)
 
 **HTML5 Canvas**와 **Web Audio API**만을 사용해 구현한  
@@ -80,6 +77,9 @@ No external libraries or assets are required.
 그리고 스펙트럼 스타일 커스터마이징 기능을 포함합니다.
 
 ---
+
+<details>
+  <summary><strong>한국어 (펼치기/접기)</strong></summary>
 
 ## ✨ 주요 기능
 
