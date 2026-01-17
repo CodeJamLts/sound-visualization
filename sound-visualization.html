@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Sound Wave (HTML5 + Web Audio API)</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", sans-serif; margin: 24px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .panel { border: 1px solid rgba(128,128,128,.35); border-radius: 12px; padding: 16px; max-width: 920px; }
+    .drop {
+      border: 2px dashed rgba(128,128,128,.45);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+      transition: .15s ease;
+      user-select: none;
+    }
+    .drop.dragover { border-color: rgba(0,150,255,.9); background: rgba(0,150,255,.08); }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(128,128,128,.4); background: transparent; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    input[type="range"] { width: 180px; }
+    canvas { width: 100%; height: 180px; display: block; border-radius: 12px; border: 1px solid rgba(128,128,128,.35); }
+    /* [요청 반영] <canvas id="wave"> 테두리 색상 투명 */
+    #wave { border-color: transparent; }
+    .meta { opacity: .85; font-size: 14px; display: flex; gap: 14px; flex-wrap: wrap; }
+    .progress { width: 100%; }
+    .hint { font-size: 13px; opacity: .8; margin-top: 10px; }
+    .small { font-size: 12px; opacity: .75; }
+    .spacer { height: 10px; }
+
+    /* [추가] 스펙트럼(파형) 색상 설정 UI */
+    .spec {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin: 10px 0 6px;
+      padding: 10px 12px;
+      border: 1px solid rgba(128,128,128,.25);
+      border-radius: 12px;
+    }
+    .spec label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; opacity: .9; }
+    .spec input[type="color"] { width: 44px; height: 30px; padding: 0; border: 1px solid rgba(128,128,128,.35); border-radius: 8px; background: transparent; }
+    .spec .mini { width: 140px; }
+    .spec .btnMini { padding: 8px 10px; border-radius: 10px; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h2 style="margin-top:0;">Sound Wave (오디오 재생 + 파형)</h2>
+
+    <div id="drop" class="drop">
+      <div style="font-weight:600;">오디오 파일을 여기에 드래그&드롭</div>
+      <div class="small">또는 아래에서 파일 선택 (mp3, wav, m4a 등)</div>
+      <div class="spacer"></div>
+      <input id="file" type="file" accept="audio/*" />
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="row">
+      <button id="btnPlay" disabled>재생</button>
+      <button id="btnPause" disabled>일시정지</button>
+      <button id="btnStop" disabled>정지</button>
+
+      <label class="row" style="gap:8px;">
+        볼륨
+        <input id="volume" type="range" min="0" max="1" step="0.01" value="1" />
+        <span id="volText" class="small">100%</span>
+      </label>
+    </div>
+
+    <div class="spacer"></div>
+
+    <input id="seek" class="progress" type="range" min="0" max="1000" value="0" disabled />
+
+    <div class="spacer"></div>
+
+    <div class="meta">
+      <div>파일: <span id="fileName">-</span></div>
+      <div>현재: <span id="curTime">00:00</span></div>
+      <div>전체: <span id="durTime">00:00</span></div>
+      <div>상태: <span id="state">대기</span></div>
+    </div>
+
+    <div class="spacer"></div>
+
+    /* 스펙트럼 색상 변경 */
+
+    <!-- [추가] 스펙트럼(파형) 색상 변경 UI -->
+    <div class="spec" aria-label="스펙트럼 색상 설정">
+      <label>
+        색상
+        <input id="specColor" type="color" value="#0078ff" />
+      </label>
+
+      <label class="row" style="gap:8px;">
+        투명도
+        <input id="specAlpha" class="mini" type="range" min="0.05" max="1" step="0.01" value="0.95" />
+        <span id="specAlphaText" class="small">95%</span>
+      </label>
+
+      <label class="row" style="gap:8px;">
+        두께
+        <input id="specWidth" class="mini" type="range" min="1" max="6" step="1" value="2" />
+        <span id="specWidthText" class="small">2px</span>
+      </label>
+
+      <button id="specReset" class="btnMini" type="button">기본값</button>
+      <span id="specHint" class="small">파형 색상/투명도/두께를 변경합니다.</span>
+    </div>
+
+    <canvas id="wave"></canvas>
+
+    <div class="hint">
+      참고: 브라우저 정책상 오디오 컨텍스트는 사용자 동작(버튼 클릭 등) 이후에만 시작됩니다.
+    </div>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+
+  const fileInput = $("file");
+  const drop = $("drop");
+
+  const btnPlay = $("btnPlay");
+  const btnPause = $("btnPause");
+  const btnStop = $("btnStop");
+
+  const volume = $("volume");
+  const volText = $("volText");
+  const seek = $("seek");
+
+  const fileName = $("fileName");
+  const curTime = $("curTime");
+  const durTime = $("durTime");
+  const state = $("state");
+
+  const canvas = $("wave");
+  const ctx = canvas.getContext("2d", { alpha: false });
+
+  /* --- [추가] 스펙트럼(파형) 색상 변경 컨트롤 --- */
+  const specColor = $("specColor");
+  const specAlpha = $("specAlpha");
+  const specAlphaText = $("specAlphaText");
+  const specWidth = $("specWidth");
+  const specWidthText = $("specWidthText");
+  const specReset = $("specReset");
+
+  /* 기본값(기존 코드의 색상값을 기준으로) */
+  const DEFAULT_LIGHT_COLOR = "#0078ff"; /* rgba(0,120,255,.95) 근사 */
+  const DEFAULT_DARK_COLOR  = "#00c8ff"; /* rgba(0,200,255,.95) 근사 */
+  const DEFAULT_ALPHA = 0.95;
+  const DEFAULT_WIDTH = 2;
+
+  /* 현재 설정값 */
+  let userWaveColor = DEFAULT_LIGHT_COLOR;
+  let userWaveAlpha = DEFAULT_ALPHA;
+  let userWaveWidth = DEFAULT_WIDTH;
+
+  function setState(text) {
+    state.textContent = text;
+  }
+
+  function formatTime(sec) {
+    if (!isFinite(sec) || sec < 0) return "00:00";
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+  }
+
+  function resizeCanvasToDisplaySize() {
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.floor(rect.width * dpr);
+    const h = Math.floor(rect.height * dpr);
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+  }
+
+  function ensureAudioGraph() {
+    if (audioCtx) return;
+
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    /* HTMLAudioElement -> MediaElementSourceNode (한 번만 생성 가능) */
+    sourceNode = audioCtx.createMediaElementSource(audio);
+
+    gainNode = audioCtx.createGain();
+    analyser = audioCtx.createAnalyser();
+
+    /* 파형(시간영역) 보기 좋게 */
+    analyser.fftSize = 2048;               /* 1024~4096 추천 */
+    analyser.smoothingTimeConstant = 0.85; /* 부드럽게 */
+
+    /* [수정] 볼륨을 조절해도 파형(분석)에 영향이 없도록
+            analyser를 gainNode 앞단에 두어 원 신호를 분석한다.
+            (기존: source -> gain -> analyser -> destination)
+            (변경: source -> analyser -> gain -> destination) */
+    sourceNode.connect(analyser);
+    analyser.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    /* 초기 볼륨 */
+    gainNode.gain.value = Number(volume.value);
+  }
+
+  function enableControls(enabled) {
+    btnPlay.disabled = !enabled;
+    btnPause.disabled = !enabled;
+    btnStop.disabled = !enabled;
+    seek.disabled = !enabled;
+  }
+
+  function stopDrawing() {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = null;
+  }
+
+  function hexToRgb(hex) {
+    const h = String(hex || "").replace("#", "").trim();
+    if (h.length !== 6) return { r: 0, g: 120, b: 255 };
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return { r: 0, g: 120, b: 255 };
+    return { r, g, b };
+  }
+
+  function getWaveStrokeStyle() {
+    /* 다크모드일 때 기본값만 자동으로 다르게 세팅(사용자 리셋용) */
+    const isDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const baseColor = userWaveColor || (isDark ? DEFAULT_DARK_COLOR : DEFAULT_LIGHT_COLOR);
+    const { r, g, b } = hexToRgb(baseColor);
+    const a = Math.min(1, Math.max(0.05, Number(userWaveAlpha) || DEFAULT_ALPHA));
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  /* --- [요청 반영] idle(최초 로드/재생 중 아님) 상태일 때 물결 애니메이션 표시 --- */
+  function isIdleState() {
+    /* 오디오가 재생 중이 아니면 idle로 간주 (최초 로드 포함) */
+    return !audio || audio.paused || audio.ended;
+  }
+
+  function drawIdleWavePath(w, h, points) {
+    /* 작은 진폭의 합성 사인파로 '물결' 느낌을 생성 */
+    const t = performance.now() * 0.002; /* 속도 */
+    const mid = h / 2;
+    const amp = Math.max(4, Math.min(h * 0.12, 18));
+
+    /* 주파수(파장) 조합 */
+    const k1 = (Math.PI * 2) * 1.2;
+    const k2 = (Math.PI * 2) * 2.0;
+
+    ctx.beginPath();
+    const sliceWidth = w / points;
+    let x = 0;
+
+    for (let i = 0; i < points; i++) {
+      const n = i / points;
+      const y = mid
+        + Math.sin(n * k1 + t) * amp * 0.75
+        + Math.sin(n * k2 - t * 1.2) * amp * 0.25;
+
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+
+      x += sliceWidth;
+    }
+  }
+
+  function drawWave() {
+    resizeCanvasToDisplaySize();
+
+    const w = canvas.width;
+    const h = canvas.height;
+
+    /* 배경 */
+    ctx.fillStyle = (matchMedia("(prefers-color-scheme: dark)").matches) ? "#0b0f14" : "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+
+    const idle = isIdleState();
+
+    /* analyser는 사용자 동작(재생 버튼 등) 이후에만 생성되는 경우가 많으므로,
+       최초 로드 상태(idle)에서는 analyser 없이도 물결을 그릴 수 있어야 한다. */
+    if (!analyser && !idle) return;
+
+    const bufferLength = analyser ? analyser.fftSize : 2048;
+    const data = (!idle && analyser) ? new Uint8Array(bufferLength) : null;
+    if (data && analyser) analyser.getByteTimeDomainData(data);
+
+    /* 중앙선 */
+    ctx.strokeStyle = "rgba(0,0,0,0)";  /* [요청 반영] 기준선 색상을 완전 투명 처리 */
+    ctx.lineWidth = Math.max(1, Math.floor(w / 900));
+    ctx.beginPath();
+    ctx.moveTo(0, h / 2);
+    ctx.lineTo(w, h / 2);
+    ctx.stroke();
+
+    /* 파형 */
+    ctx.strokeStyle = getWaveStrokeStyle();
+    ctx.lineWidth = Math.max(Number(userWaveWidth) || 2, Math.floor(w / 600));
+    if (idle) {
+      /* idle: 물결 */
+      drawIdleWavePath(w, h, bufferLength);
+    } else {
+      /* 재생 중: 실제 파형 */
+      ctx.beginPath();
+
+      const sliceWidth = w / bufferLength;
+      let x = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        const v = data[i] / 128.0;     /* 0~2 */
+        const y = (v * h) / 2;         /* 0~h */
+
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+
+        x += sliceWidth;
+      }
+    }
+    ctx.stroke();
+
+    /* 진행상태 표시(텍스트) */
+    ctx.fillStyle = (matchMedia("(prefers-color-scheme: dark)").matches) ? "rgba(255,255,255,.7)" : "rgba(0,0,0,.6)";
+    ctx.font = `${Math.max(12, Math.floor(w / 70))}px system-ui, sans-serif`;
+
+    rafId = requestAnimationFrame(drawWave);
+  }
+
+  function startDrawing() {
+    stopDrawing();
+    rafId = requestAnimationFrame(drawWave);
+  }
+
+  function loadFile(file) {
+    if (!file) return;
+    if (!file.type.startsWith("audio/")) {
+      alert("오디오 파일만 선택할 수 있습니다.");
+      return;
+    }
+
+    /* 기존 URL 해제 */
+    if (audio.src && audio.src.startsWith("blob:")) {
+      URL.revokeObjectURL(audio.src);
+    }
+
+    const url = URL.createObjectURL(file);
+    audio.src = url;
+    audio.load();
+
+    fileName.textContent = file.name;
+    curTime.textContent = "00:00";
+    durTime.textContent = "00:00";
+    seek.value = "0";
+    setState("로딩");
+
+    enableControls(true);
+  }
+
+  /* --- Audio elements / nodes --- */
+  const audio = new Audio();
+  audio.preload = "auto";
+  audio.crossOrigin = "anonymous"; /* 로컬 파일에는 영향 없지만, URL 재생 시 필요할 수 있음. */
+
+  let audioCtx = null;
+  let sourceNode = null;
+  let analyser = null;
+  let gainNode = null;
+
+  let rafId = null;
+  let seeking = false;
+
+  /* --- UI events --- */
+  fileInput.addEventListener("change", (e) => {
+    const f = e.target.files?.[0];
+    loadFile(f);
+  });
+
+  /* drag & drop */
+  ["dragenter", "dragover"].forEach(ev => {
+    drop.addEventListener(ev, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      drop.classList.add("dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach(ev => {
+    drop.addEventListener(ev, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      drop.classList.remove("dragover");
+    });
+  });
+  drop.addEventListener("drop", (e) => {
+    const f = e.dataTransfer?.files?.[0];
+    loadFile(f);
+  });
+
+  /* volume */
+  volume.addEventListener("input", () => {
+    const v = Number(volume.value);
+    volText.textContent = `${Math.round(v * 100)}%`;
+    if (gainNode) gainNode.gain.value = v;
+  });
+
+  /* seek bar */
+  seek.addEventListener("input", () => { seeking = true; });
+  seek.addEventListener("change", () => {
+    if (!isFinite(audio.duration) || audio.duration <= 0) {
+      seeking = false;
+      return;
+    }
+    const ratio = Number(seek.value) / Number(seek.max);
+    audio.currentTime = ratio * audio.duration;
+    seeking = false;
+  });
+
+  /* playback buttons */
+  btnPlay.addEventListener("click", async () => {
+    ensureAudioGraph();
+    /* iOS/Chrome 정책: 사용자 클릭 후 resume 필요 */
+    if (audioCtx?.state === "suspended") await audioCtx.resume();
+
+    try {
+      await audio.play();
+      setState("재생 중");
+      startDrawing();
+    } catch (err) {
+      console.error(err);
+      alert("재생을 시작할 수 없습니다. 파일을 다시 선택해 보세요.");
+    }
+  });
+
+  btnPause.addEventListener("click", () => {
+    audio.pause();
+    setState("일시정지");
+  });
+
+  btnStop.addEventListener("click", () => {
+    audio.pause();
+    audio.currentTime = 0;
+    setState("정지");
+  });
+
+  /* audio events */
+  audio.addEventListener("loadedmetadata", () => {
+    durTime.textContent = formatTime(audio.duration);
+    setState("준비됨");
+  });
+
+  audio.addEventListener("timeupdate", () => {
+    curTime.textContent = formatTime(audio.currentTime);
+    if (!seeking && isFinite(audio.duration) && audio.duration > 0) {
+      const ratio = audio.currentTime / audio.duration;
+      seek.value = String(Math.floor(ratio * Number(seek.max)));
+    }
+  });
+
+  audio.addEventListener("ended", () => {
+    setState("재생 완료");
+  });
+
+  /* --- [추가] 스펙트럼(파형) 색상 변경 이벤트 --- */
+  function syncSpecUiText() {
+    specAlphaText.textContent = `${Math.round((Number(specAlpha.value) || DEFAULT_ALPHA) * 100)}%`;
+    specWidthText.textContent = `${Number(specWidth.value) || DEFAULT_WIDTH}px`;
+  }
+
+  function applySpecFromUi() {
+    userWaveColor = specColor.value;
+    userWaveAlpha = Number(specAlpha.value);
+    userWaveWidth = Number(specWidth.value);
+    syncSpecUiText();
+  }
+
+  /* 최초: 현재 모드에 맞는 기본 색상으로 UI 초기화 */
+  (() => {
+    const isDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    specColor.value = isDark ? DEFAULT_DARK_COLOR : DEFAULT_LIGHT_COLOR;
+    specAlpha.value = String(DEFAULT_ALPHA);
+    specWidth.value = String(DEFAULT_WIDTH);
+    applySpecFromUi();
+
+    /* 모드가 바뀌면(예: OS 테마 전환) 사용자가 직접 바꾼 값이 없을 때만 기본값을 반영하기 위해
+       여기서는 자동 덮어쓰지는 하지 않습니다(사용자 설정 우선). */
+  })();
+
+  specColor.addEventListener("input", applySpecFromUi);
+  specAlpha.addEventListener("input", applySpecFromUi);
+  specWidth.addEventListener("input", applySpecFromUi);
+
+  specReset.addEventListener("click", () => {
+    const isDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    specColor.value = isDark ? DEFAULT_DARK_COLOR : DEFAULT_LIGHT_COLOR;
+    specAlpha.value = String(DEFAULT_ALPHA);
+    specWidth.value = String(DEFAULT_WIDTH);
+    applySpecFromUi();
+  });
+
+  window.addEventListener("resize", () => resizeCanvasToDisplaySize());
+  resizeCanvasToDisplaySize();
+
+  /* [요청 반영] HTML 최초 로드 상태에서도 물결이 보이도록 즉시 렌더링 시작 */
+  startDrawing();
+})();
+</script>
+</body>
+</html>
